@@ -6,7 +6,7 @@ import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 
 CONFIG = {
-    "csv_file": "./data/",
+    "csv_file": "./data/TC_Filtered_Data.csv",
     "output_dir": "./dataset",
     "seq_length": 5
 }
@@ -20,9 +20,17 @@ def create_data(
     is_train = False
 ): 
     feats = ['lat', 'lon', 'umax', 'press',
-        'u24_past', 'mov_speed', 'mov_angle',
-        'u_st', 'v_st',
-        'ws_200', 'owz_500', 'owz_850', 'rh_700', 'rh_925', 'sph_925'
+        'u24_past', 
+        'mov_speed', 
+        'mov_angle',
+        'u_st', 
+        'v_st',
+        'ws_200',
+        'owz_500', 
+        'owz_850', 
+        'rh_700', 
+        'rh_925', 
+        'sph_925'
     ]
     
     targets = ['lat', 'lon', 'umax', 'press']
@@ -43,6 +51,7 @@ def create_data(
     for i, c in enumerate(targets): df_s[f"TG_{c}"] = y_s[:, i]
     
     X, y = [], []
+    
     # Group by SID using original DF indices
     for sid, idxs in df.groupby('sid', sort=False).indices.items():
         grp = df_s.iloc[idxs].reset_index(drop=True)
@@ -51,7 +60,7 @@ def create_data(
         arr_x = grp[feats].values
         arr_y = grp[[f"TG_{c}" for c in targets]].values
         
-        for i in range(len(grp) - CONFIG['']):
+        for i in range(len(grp) - CONFIG['seq_length']):
             X.append(arr_x[i : i+CONFIG['seq_length']])
             y.append(arr_y[i + CONFIG['seq_length']]) # Predict t+1
 
@@ -67,9 +76,9 @@ def create_dataset(
     df = pd.read_csv(CONFIG['csv_file'])
     df['year'] = pd.to_datetime(df['time']).dt.year
     
-    train = df[(df.y >= train_split[0]) & (df.y <= train_split[1])]
-    val   = df[(df.y >= val_split[0]) & (df.y <= val_split[1])]
-    test  = df[(df.y >= test_split[0]) & (df.y <= test_split[1])]
+    train = df[(df['year'] >= train_split[0]) & (df['year'] <= train_split[1])]
+    val   = df[(df['year'] >= val_split[0]) & (df['year'] <= val_split[1])]
+    test  = df[(df['year'] >= test_split[0]) & (df['year'] <= test_split[1])]
     
     print("Building Train...")
     Xt, yt, sx, sy = create_data(train, None, None, True)
@@ -83,3 +92,6 @@ def create_dataset(
             pickle.dump(data, f)
             
     print(f"Done. Train shape: {Xt.shape}")
+    
+if __name__ == "__main__":
+    create_dataset()
