@@ -1,0 +1,26 @@
+--- Eval on cuda ---
+
+>>> Calculating RI Metrics...
+
+==================================================
+        RAPID INTENSIFICATION (RI) REPORT         
+==================================================
+Total Storms Tested: 34
+True RI Events:      3
+Predicted RI Events: 2
+--------------------------------------------------
+TP (Correct RI):     2
+TN (Correct Non-RI): 31
+FP (False Alarm):    0
+FN (Missed RI):      1
+--------------------------------------------------
+HSS Score:           0.7848
+POD (Detection Rate):0.6667
+FAR (False Alarm):   0.0000
+==================================================
+
+[Missed RI Storms (Real RI but Model missed)]:
+['DAMREY (2000)']
+
+[False Alarm Storms (Model predicted RI but Wrong)]:
+[]
