@@ -5,3 +5,8 @@ h5netcdf
 xarray
 sklearn
 matplotlib
+streamlit
+cartopy
+plotly
+joblib
+seaborn
