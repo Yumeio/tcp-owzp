@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import r2_score 
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 
 from model import Transformer
 from processor import haversine_dist
@@ -60,13 +60,12 @@ def load_csv_data():
     return df
 
 @st.cache_data
-def evaluate_global_model(_model, _scaler, X_test, y_test, device_str):
+def get_model_performance(_model, _scaler, X_test, y_test, device_str):
     device = torch.device(device_str)
-    batch_size = 512
-    preds_list = []
-    
     X_tensor = torch.tensor(X_test, dtype=torch.float32)
     
+    batch_size = 128
+    preds_list = []
     with torch.no_grad():
         for i in range(0, len(X_tensor), batch_size):
             batch_x = X_tensor[i:i+batch_size].to(device)
@@ -75,25 +74,42 @@ def evaluate_global_model(_model, _scaler, X_test, y_test, device_str):
             preds_list.append(batch_pred.cpu().numpy())
             
     preds = np.concatenate(preds_list, axis=0)
+    
+    # 2. Inverse Scale
     preds_real = _scaler.inverse_transform(preds)
     trues_real = _scaler.inverse_transform(y_test)
     
-    metrics = {}
-    dists = haversine_dist(trues_real[:,1], trues_real[:,0], preds_real[:,1], preds_real[:,0])
-    metrics["Track_Err_Mean"] = np.mean(dists)
+    targets = ['Latitude', 'Longitude', 'Wind Speed', 'Pressure']
+    metrics_data = []
     
-    targets = ['Lat', 'Lon', 'Wind', 'Press']
-    for i, tag in enumerate(targets):
-        metrics[f"{tag}_MAE"] = np.mean(np.abs(preds_real[:, i] - trues_real[:, i]))
-        metrics[f"{tag}_RMSE"] = np.sqrt(np.mean((preds_real[:, i] - trues_real[:, i])**2))
-        metrics[f"{tag}_R2"] = r2_score(trues_real[:, i], preds_real[:, i])
+    for i, target in enumerate(targets):
+        p_col = preds_real[:, i]
+        t_col = trues_real[:, i]
         
-    return metrics, preds_real, trues_real, dists
+        mae = mean_absolute_error(t_col, p_col)
+        mse = mean_squared_error(t_col, p_col)
+        rmse = np.sqrt(mse)
+        r2 = r2_score(t_col, p_col)
+        
+        metrics_data.append([target, mae, mse, rmse, r2])
+        
+    df_perf = pd.DataFrame(metrics_data, columns=['Target Feature', 'MAE', 'MSE', 'RMSE', 'R² Score'])
+    
+    # 4. Tính Track Error (Km)
+    dists = haversine_dist(trues_real[:,1], trues_real[:,0], preds_real[:,1], preds_real[:,0])
+    track_stats = {
+        "Mean": np.mean(dists),
+        "Median": np.median(dists),
+        "Max": np.max(dists),
+        "Std": np.std(dists)
+    }
+    
+    return df_perf, track_stats, preds_real, trues_real
 
 def show_forecast_page():
     try:
         model, scaler, X_test, y_test, sids_test, DEVICE = load_model_system()
-        g_metrics, g_preds, g_trues, g_dists = evaluate_global_model(model, scaler, X_test, y_test, str(DEVICE))
+        df_perf, track_stats, g_preds, g_trues = get_model_performance(model, scaler, X_test, y_test, str(DEVICE))
     except Exception as e:
         st.error(f"⚠️ System Error: {e}")
         return
@@ -108,11 +124,12 @@ def show_forecast_page():
             unique_sids = sorted(list(set(sids_test)))
             sel_sid = st.selectbox("Select Test Storm:", unique_sids)
 
+        # Lấy data bão
         indices = [i for i, s in enumerate(sids_test) if s == sel_sid]
         storm_trues = g_trues[indices]
         storm_preds = g_preds[indices]
 
-        # RI Check
+        # Check RI (Đơn giản hóa cho UI)
         is_ri = False
         max_inc = 0
         if len(storm_preds) > 4:
@@ -124,11 +141,13 @@ def show_forecast_page():
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Max Wind", f"{storm_trues[:, 2].max():.1f} m/s")
             k2.metric("Min Press", f"{storm_trues[:, 3].min():.0f} hPa")
-            track_err = np.mean(haversine_dist(storm_trues[:,1], storm_trues[:,0], storm_preds[:,1], storm_preds[:,0]))
-            k3.metric("Avg Track Err", f"{track_err:.1f} km")
+            current_err = np.mean(haversine_dist(storm_trues[:,1], storm_trues[:,0], storm_preds[:,1], storm_preds[:,0]))
+            k3.metric("Avg Track Err", f"{current_err:.1f} km")
+            
             if is_ri: k4.error(f"⚠️ RI PREDICTED (+{max_inc:.1f} m/s)")
             else: k4.success("✅ Intensity Stable")
 
+        # Biểu đồ
         c1, c2 = st.columns([3, 2])
         with c1:
             fig_map = go.Figure()
@@ -137,56 +156,57 @@ def show_forecast_page():
             fig_map.update_layout(mapbox_style="open-street-map", height=450, margin={"r":0,"t":0,"l":0,"b":0},
                                   mapbox=dict(center=dict(lat=np.mean(storm_trues[:,0]), lon=np.mean(storm_trues[:,1])), zoom=3))
             st.plotly_chart(fig_map, use_container_width=True)
+        
         with c2:
+            # Wind
             fig_w = go.Figure()
             fig_w.add_trace(go.Scatter(y=storm_trues[:,2], name='True Wind', line=dict(color='blue')))
             fig_w.add_trace(go.Scatter(y=storm_preds[:,2], name='Pred Wind', line=dict(color='red', dash='dash')))
-            fig_w.update_layout(title="Intensity (Wind Speed)", height=220, margin=dict(l=0,r=0,t=30,b=0))
+            fig_w.update_layout(title="Wind Speed (m/s)", height=220, margin=dict(l=0,r=0,t=30,b=0))
             st.plotly_chart(fig_w, use_container_width=True)
-            
+            # Press
             fig_p = go.Figure()
             fig_p.add_trace(go.Scatter(y=storm_trues[:,3], name='True Press', line=dict(color='green')))
             fig_p.add_trace(go.Scatter(y=storm_preds[:,3], name='Pred Press', line=dict(color='orange', dash='dash')))
-            fig_p.update_layout(title="Intensity (Pressure)", height=220, margin=dict(l=0,r=0,t=30,b=0))
+            fig_p.update_layout(title="Pressure (hPa)", height=220, margin=dict(l=0,r=0,t=30,b=0))
             st.plotly_chart(fig_p, use_container_width=True)
 
     # --- TAB 2: SCOREBOARD ---
     with tab_score:
         st.subheader("📊 Overall Model Performance")
         
-        st.markdown("##### 1. Track Forecasting")
-        col_t1, col_t2 = st.columns([1, 2])
-        with col_t1:
-            st.metric("Mean Distance Error", f"{g_metrics['Track_Err_Mean']:.2f} km")
-            st.metric("Lat R² Score", f"{g_metrics['Lat_R2']:.4f}")
-            st.metric("Lon R² Score", f"{g_metrics['Lon_R2']:.4f}")
-        with col_t2:
-            fig_hist = px.histogram(g_dists, nbins=50, title="Track Error Distribution (km)", color_discrete_sequence=['indianred'])
-            st.plotly_chart(fig_hist, use_container_width=True)
-
-        st.markdown("---")
-        st.markdown("##### 2. Intensity Forecasting")
-        
-        df_metrics = pd.DataFrame({
-            'Metric': ['MAE', 'RMSE', 'R² Score'],
-            'Wind (m/s)': [g_metrics['Wind_MAE'], g_metrics['Wind_RMSE'], g_metrics['Wind_R2']],
-            'Pressure (hPa)': [g_metrics['Press_MAE'], g_metrics['Press_RMSE'], g_metrics['Press_R2']]
-        })
+        st.caption("Số liệu được tính toán trực tiếp từ toàn bộ tập dữ liệu kiểm tra (Test Set).")
+       
         st.dataframe(
-            df_metrics.style.background_gradient(
-                cmap="Blues", 
-                subset=['Wind (m/s)', 'Pressure (hPa)']
-                ), use_container_width=True
-            )
-
-        st.info("ℹ️ **R² Score:** Càng gần 1.0 càng tốt. Nếu âm hoặc gần 0 nghĩa là mô hình dự báo kém.")
+            df_perf.style.format({
+                'MAE': '{:.3f}', 'MSE': '{:.3f}', 'RMSE': '{:.3f}', 'R² Score': '{:.4f}'
+            }).background_gradient(cmap='Blues', subset=['MAE', 'RMSE'])  
+                .background_gradient(cmap='Greens', subset=['R² Score']),  
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        col_note1, col_note2 = st.columns(2)
+        col_note1.info("ℹ️ **MAE/RMSE:** Càng thấp càng tốt (0 là hoàn hảo).")
+        col_note2.success("ℹ️ **R² Score:** Càng gần 1.0 càng tốt.")
 
         st.markdown("---")
-        st.markdown("##### 3. RI Skill")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("HSS Score", "0.7848", "Excellent")
-        c2.metric("POD", "66.7%", "2/3 Events")
-        c3.metric("False Alarm", "0.0%", "Perfect")
+
+        # --- Bảng 2: Track Error ---
+        st.subheader("2. Đánh Giá Sai Số Khoảng Cách (Track Error)")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Mean Error", f"{track_stats['Mean']:.2f} km", delta_color="inverse")
+        c2.metric("Median Error", f"{track_stats['Median']:.2f} km", delta_color="inverse")
+        c3.metric("Max Error", f"{track_stats['Max']:.2f} km", delta_color="inverse")
+        c4.metric("Std Dev", f"{track_stats['Std']:.2f} km")
+
+        st.markdown("---")
+        # --- Bảng 3: RI Skill (Số liệu tham khảo từ eval.py) ---
+        st.subheader("3. Rapid Intensification (RI) Skill")
+        r1, r2, r3 = st.columns(3)
+        r1.metric("HSS Score", "0.7848", "Excellent")
+        r2.metric("POD (Detection)", "66.7%", "2/3 Events")
+        r3.metric("False Alarm", "0.0%", "Perfect")
 
 def show_analysis_page():
     st.title("📊 Advanced Data Analytics & Scoring")
@@ -216,9 +236,7 @@ def show_analysis_page():
         "🗺️ Density Map"
     ])
 
-    # -------------------------------------------------------------------------
     # TAB 1: DEEP CORRELATION (INTERACTIVE)
-    # -------------------------------------------------------------------------
     with tabs[0]:
         st.subheader("Interactive Correlation Analysis")
         st.caption("Khám phá mối quan hệ giữa các biến môi trường và cường độ bão.")
@@ -269,7 +287,7 @@ def show_analysis_page():
         # Hiển thị Global Heatmap ở dưới
         with st.expander("View Full Correlation Matrix (Heatmap)"):
             corr_matrix = df[numeric_cols].corr()
-            fig_heat = px.imshow(corr_matrix, text_auto=".2f", aspect="auto", color_continuous_scale="RdBu_r")
+            fig_heat = px.imshow(corr_matrix, text_auto=".3f", aspect="auto", color_continuous_scale="RdBu_r")
             st.plotly_chart(fig_heat, use_container_width=True)
 
     with tabs[1]:
