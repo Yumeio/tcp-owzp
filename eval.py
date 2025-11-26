@@ -12,7 +12,12 @@ CFG = {
     "checkpoint": "./checkpoint/model.pth",
     "scaler_path": "./dataset/scaler_y.pkl",
     "ibtracs_path": "./data/IBTrACS.WP.v04r01.nc", # Đường dẫn IBTrACS
-    "out_dim": 4, "emb": 128, "n_head": 8, "layer": 4, "drop": 0.0, "bs": 256,
+    "out_dim": 4, 
+    "emb": 256, 
+    "n_head": 8, 
+    "layer": 4, 
+    "drop": 0.0, 
+    "bs": 128,
     "device": torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 }
 

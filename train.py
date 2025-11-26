@@ -9,14 +9,14 @@ from dataset import TCDataset
 from model import Transformer
 
 CFG = {
-    "data_dir": "./ds",
+    "data_dir": "./dataset",
     "save_path": "./checkpoint/model.pth",
     "plot_path": "./checkpoint/loss_chart.png", 
     "out_dim": 4,
-    'emb': 128,
+    'emb': 256,
     "n_head": 8,
     "layer": 4,
-    "drop": 0.1,
+    "drop": 0.0,
     "bs": 128,
     "lr": 1e-4,
     "epoch": 200,

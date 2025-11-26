@@ -30,7 +30,7 @@ def load_model_system():
     model = Transformer(
         input_dim=15, 
         output_dim=4, 
-        embed_dim=128, 
+        embed_dim=256, 
         num_heads=8, 
         num_encoder_layers=4, 
         num_decoder_layers=4,
