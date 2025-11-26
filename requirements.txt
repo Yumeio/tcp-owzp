@@ -10,3 +10,4 @@ cartopy
 plotly
 joblib
 seaborn
+statsmodels
