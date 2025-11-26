@@ -242,7 +242,6 @@ def show_analysis_page():
         "🗺️ Density Map"
     ])
     
-    # TAB 0: FEATURE INFORMATION
     with tabs[0]:
         st.subheader("📖 Features Dictionary")
         st.caption("Chi tiết về 15 đặc trưng đầu vào được sử dụng trong mô hình.")
@@ -277,7 +276,6 @@ def show_analysis_page():
         # Hiển thị bảng
         st.table(df_info)
     
-    # TAB 1: DEEP CORRELATION (INTERACTIVE)
     with tabs[1]:
         st.subheader("📊 Interactive Correlation Analysis")
         st.caption("Khám phá mối quan hệ giữa các biến môi trường và cường độ bão.")
@@ -406,6 +404,7 @@ def show_analysis_page():
 def show_model_artitechture():
     st.title("Model Architecture")
     
+    # 1. Summary
     st.subheader("📊 Model Summary")
     
     try:
@@ -414,17 +413,7 @@ def show_model_artitechture():
         st.error(f"⚠️ System Error: {e}")
         return
     
-    model_stat = summary(
-        model=model,
-        input_size=[(1, 5, 15), (1, 1, 4)],
-        col_names=["input_size", "output_size", "num_params", "trainable"],
-        row_settings=["var_names"],
-        verbose=0
-    )
-    
-    st.text(str(model_stat))
-    
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3 , col4, col5, col6 = st.columns(6)
     with col1:
         total_params = sum(p.numel() for p in model.parameters())
         st.metric("Total Parameters", f"{total_params:,}")
@@ -433,41 +422,19 @@ def show_model_artitechture():
         st.metric("Trainable Parameters", f"{trainable_params:,}")
     with col3:
         model_size = total_params * 4 / (1024**2)  # Assuming float32
-        st.metric("Model Size", f"{model_size:.2f} MB")
-    
-    st.divider()
-    
-    # 2. Vẽ Computational Graph
-    st.subheader("🏗️ Model Computational Graph")
-    
-    try:
-        # Tạo dummy input
-        dummy_input = torch.randn(1, 5, 15).to(next(model.parameters()).device)
-        dummy_output = torch.randn(1, 1, 4).to(next(model.parameters()).device)
-        # Forward pass
-        model.eval()
-        with torch.no_grad():
-            output = model(dummy_input, dummy_output)
+        st.metric("Model Size", f"{model_size:.3f} MB")
+    with col4:
+        st.metric("Loss", f"0.000973")
+    with col5:
+        st.metric("Val", f"0.000814")
+    with col6:
+        st.metric("Time", f"15p")
         
-        # Tạo graph
-        dot = make_dot(
-            output, 
-            params=dict(model.named_parameters())
-        )
-        
-        # Lưu và hiển thị
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-            dot.format = 'png'
-            dot.render(tmp.name.replace('.png', ''), cleanup=True)
-            st.image(tmp.name, use_container_width=True)
-            
-    except Exception as e:
-        st.error(f"Không thể vẽ computational graph: {e}")
-        st.info("Cài đặt: pip install torchviz graphviz")
-    
+    st.image("./reports/loss_chart.png", caption="Training Loss", use_container_width=True)
     st.divider()
+
     
-    # 3. Layer Details
+    # 2. Layer Details
     st.subheader("📋 Layer Details")
     
     layer_data = []
@@ -487,7 +454,7 @@ def show_model_artitechture():
     # 4. Model Architecture Text
     st.subheader("📝 Model Structure")
     with st.expander("View Full Model Structure"):
-        st.code(str(model), language="javascript")
+        st.code(str(model), language="typescript")
 
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to:", ["Forecast System", "Dataset Analytics", "Model Artitechture"])
