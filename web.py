@@ -10,6 +10,9 @@ import plotly.express as px
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+import tempfile
+from torchinfo import summary
+from torchviz import make_dot 
 
 from model import Transformer
 from processor import haversine_dist
@@ -101,7 +104,8 @@ def get_model_performance(_model, _scaler, X_test, y_test, device_str):
         "Mean": np.mean(dists),
         "Median": np.median(dists),
         "Max": np.max(dists),
-        "Std": np.std(dists)
+        "Std": np.std(dists),
+        "RMSE": np.sqrt(np.mean(dists**2)) 
     }
     
     return df_perf, track_stats, preds_real, trues_real
@@ -192,17 +196,18 @@ def show_forecast_page():
 
         st.markdown("---")
 
-        # --- Bảng 2: Track Error ---
-        st.subheader("2. Đánh Giá Sai Số Khoảng Cách (Track Error)")
-        c1, c2, c3, c4 = st.columns(4)
+        # --- Bảng 1: Track Error ---
+        st.subheader("1. Track Error")
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Mean Error", f"{track_stats['Mean']:.2f} km", delta_color="inverse")
-        c2.metric("Median Error", f"{track_stats['Median']:.2f} km", delta_color="inverse")
-        c3.metric("Max Error", f"{track_stats['Max']:.2f} km", delta_color="inverse")
-        c4.metric("Std Dev", f"{track_stats['Std']:.2f} km")
+        c2.metric("RMSE", f"{track_stats['RMSE']:.2f} km", delta_color="inverse")
+        c3.metric("Median Error", f"{track_stats['Median']:.2f} km", delta_color="inverse")
+        c4.metric("Max Error", f"{track_stats['Max']:.2f} km", delta_color="inverse")
+        c5.metric("Std Dev", f"{track_stats['Std']:.2f} km")
 
         st.markdown("---")
-        # --- Bảng 3: RI Skill (Số liệu tham khảo từ eval.py) ---
-        st.subheader("3. Rapid Intensification (RI) Skill")
+        # --- Bảng 2: RI Skill (Số liệu tham khảo từ eval.py) ---
+        st.subheader("2. Rapid Intensification (RI) Skill")
         r1, r2, r3 = st.columns(3)
         r1.metric("HSS Score", "0.7848", "Excellent")
         r2.metric("POD (Detection)", "66.7%", "2/3 Events")
@@ -230,15 +235,51 @@ def show_analysis_page():
 
     # --- TABS ---
     tabs = st.tabs([
+        "ℹ️ Features Info",
         "🔍 Deep Correlation", 
         "⭐ Feature Scores", 
         "🏆 Storm Rankings", 
         "🗺️ Density Map"
     ])
-
-    # TAB 1: DEEP CORRELATION (INTERACTIVE)
+    
+    # TAB 0: FEATURE INFORMATION
     with tabs[0]:
-        st.subheader("Interactive Correlation Analysis")
+        st.subheader("📖 Features Dictionary")
+        st.caption("Chi tiết về 15 đặc trưng đầu vào được sử dụng trong mô hình.")
+
+        # Tạo dữ liệu cho bảng (15 dòng, 4 cột)
+        features_data = [
+            # --- TRACK GROUP ---
+            ["lat", "Latitude", "Vĩ độ của tâm bão (Bắc/Nam)", "IBTrACS (Observed)"],
+            ["lon", "Longitude", "Kinh độ của tâm bão (Đông/Tây)", "IBTrACS (Observed)"],
+            ["umax", "Max Sustained Wind", "Tốc độ gió mạnh nhất gần tâm bão (m/s)", "IBTrACS (Observed)"],
+            ["press", "Min Central Pressure", "Áp suất khí quyển thấp nhất tại tâm (hPa)", "IBTrACS (Observed)"],
+            ["u24_past", "24h Intensity Change", "Sự thay đổi tốc độ gió so với 24h trước", r"$V_t - V_{t-24h}$"],
+            
+            # --- KINEMATICS GROUP ---
+            ["mov_speed", "Translation Speed", "Tốc độ di chuyển tịnh tiến của bão (km/h)", r"$Distance(t, t-6h) / 6$"],
+            ["mov_angle", "Heading Angle", "Góc hướng di chuyển so với phương Bắc", r"$\arctan(\Delta Lon, \Delta Lat)$"],
+            
+            # --- ENVIRONMENT GROUP (NCEP) ---
+            ["u_st", "Zonal Steering Flow", "Dòng dẫn đường phương Đông-Tây (Trung bình lớp sâu)", r"$\frac{\sum U_p \cdot w_p}{\sum w_p}$ (850-200hPa)"],
+            ["v_st", "Meridional Steering Flow", "Dòng dẫn đường phương Bắc-Nam (Trung bình lớp sâu)", r"$\frac{\sum V_p \cdot w_p}{\sum w_p}$ (850-200hPa)"],
+            ["ws_200", "Deep-Layer Wind Shear", "Độ chênh lệch vector gió giữa tầng 200hPa và 850hPa", r"$\sqrt{(U_{200}-U_{850})^2 + (V_{200}-V_{850})^2}$"],
+            ["owz_500", "Okubo-Weiss Zeta (500)", "Thông số biến dạng & độ xoáy tại tầng 500hPa (nhận diện lõi bão)", r"$S_n^2 + S_s^2 - \zeta^2$"],
+            ["owz_850", "Okubo-Weiss Zeta (850)", "Thông số biến dạng & độ xoáy tại tầng 850hPa", r"$S_n^2 + S_s^2 - \zeta^2$"],
+            ["rh_700", "Relative Humidity (700)", "Độ ẩm tương đối tại tầng trung (700hPa)", "NCEP Reanalysis"],
+            ["rh_925", "Relative Humidity (925)", "Độ ẩm tương đối tại tầng thấp (925hPa)", "NCEP Reanalysis"],
+            ["sph_925", "Specific Humidity (925)", "Độ ẩm riêng (lượng hơi nước thực tế) tại 925hPa", "NCEP Reanalysis"]
+        ]
+
+        # Tạo DataFrame
+        df_info = pd.DataFrame(features_data, columns=["CSV Column", "Full Name", "Description", "Formula / Source"])
+        
+        # Hiển thị bảng
+        st.table(df_info)
+    
+    # TAB 1: DEEP CORRELATION (INTERACTIVE)
+    with tabs[1]:
+        st.subheader("📊 Interactive Correlation Analysis")
         st.caption("Khám phá mối quan hệ giữa các biến môi trường và cường độ bão.")
 
         c1, c2, c3 = st.columns([1, 1, 2])
@@ -270,8 +311,8 @@ def show_analysis_page():
         with c3:
             st.write(f"**Analysis: {x_axis} vs {y_axis}**")
             
-        # Lấy mẫu random 2000 điểm để vẽ cho nhanh (nếu data > 5000)
-        plot_df = df.sample(2000) if len(df) > 5000 else df
+        # Lấy mẫu random 3000 điểm để vẽ cho nhanh (nếu data > 5000)
+        plot_df = df.sample(3000) if len(df) > 5000 else df
         
         fig_scatter = px.scatter(
             plot_df, x=x_axis, y=y_axis, 
@@ -290,7 +331,7 @@ def show_analysis_page():
             fig_heat = px.imshow(corr_matrix, text_auto=".3f", aspect="auto", color_continuous_scale="RdBu_r")
             st.plotly_chart(fig_heat, use_container_width=True)
 
-    with tabs[1]:
+    with tabs[2]:
         st.subheader("⭐ Feature Importance Scores")
         st.caption("Các yếu tố nào ảnh hưởng mạnh nhất đến sự thay đổi cường độ bão (u24_past)?")
         
@@ -323,7 +364,7 @@ def show_analysis_page():
         * **Điểm Âm (-):** Yếu tố kìm hãm bão (VD: `ws_200` - Gió cắt càng lớn, bão càng khó mạnh lên).
         """)
 
-    with tabs[2]:
+    with tabs[3]:
         st.subheader("🏆 Typhoon Hall of Fame")
         
         col_rank1, col_rank2 = st.columns(2)
@@ -351,7 +392,7 @@ def show_analysis_page():
                 use_container_width=True
             )
 
-    with tabs[3]:
+    with tabs[4]:
         st.subheader("🌏 Global Activity Map")
         fig_dens = px.density_mapbox(
             df.sample(frac=0.2), # Sample 20%
@@ -362,9 +403,97 @@ def show_analysis_page():
         )
         st.plotly_chart(fig_dens, use_container_width=True)
 
+def show_model_artitechture():
+    st.title("Model Architecture")
+    
+    st.subheader("📊 Model Summary")
+    
+    try:
+        model, _, _, _, _, DEVICE = load_model_system()
+    except Exception as e:
+        st.error(f"⚠️ System Error: {e}")
+        return
+    
+    model_stat = summary(
+        model=model,
+        input_size=[(1, 5, 15), (1, 1, 4)],
+        col_names=["input_size", "output_size", "num_params", "trainable"],
+        row_settings=["var_names"],
+        verbose=0
+    )
+    
+    st.text(str(model_stat))
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        total_params = sum(p.numel() for p in model.parameters())
+        st.metric("Total Parameters", f"{total_params:,}")
+    with col2:
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        st.metric("Trainable Parameters", f"{trainable_params:,}")
+    with col3:
+        model_size = total_params * 4 / (1024**2)  # Assuming float32
+        st.metric("Model Size", f"{model_size:.2f} MB")
+    
+    st.divider()
+    
+    # 2. Vẽ Computational Graph
+    st.subheader("🏗️ Model Computational Graph")
+    
+    try:
+        # Tạo dummy input
+        dummy_input = torch.randn(1, 5, 15).to(next(model.parameters()).device)
+        dummy_output = torch.randn(1, 1, 4).to(next(model.parameters()).device)
+        # Forward pass
+        model.eval()
+        with torch.no_grad():
+            output = model(dummy_input, dummy_output)
+        
+        # Tạo graph
+        dot = make_dot(
+            output, 
+            params=dict(model.named_parameters())
+        )
+        
+        # Lưu và hiển thị
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+            dot.format = 'png'
+            dot.render(tmp.name.replace('.png', ''), cleanup=True)
+            st.image(tmp.name, use_container_width=True)
+            
+    except Exception as e:
+        st.error(f"Không thể vẽ computational graph: {e}")
+        st.info("Cài đặt: pip install torchviz graphviz")
+    
+    st.divider()
+    
+    # 3. Layer Details
+    st.subheader("📋 Layer Details")
+    
+    layer_data = []
+    for name, module in model.named_modules():
+        if len(list(module.children())) == 0:  # Only leaf modules
+            params = sum(p.numel() for p in module.parameters())
+            layer_data.append({
+                "Layer Name": name,
+                "Type": module.__class__.__name__,
+                "Parameters": f"{params:,}"
+            })
+    
+    st.dataframe(layer_data, use_container_width=True)
+    
+    st.divider()
+    
+    # 4. Model Architecture Text
+    st.subheader("📝 Model Structure")
+    with st.expander("View Full Model Structure"):
+        st.code(str(model), language="javascript")
+
 st.sidebar.title("Navigation")
-page = st.sidebar.radio("Go to:", ["Forecast System", "Dataset Analytics"])
+page = st.sidebar.radio("Go to:", ["Forecast System", "Dataset Analytics", "Model Artitechture"])
 if page == "Forecast System": 
     show_forecast_page()
-else: 
+elif page == "Dataset Analytics": 
     show_analysis_page()
+else:
+    show_model_artitechture()

@@ -11,3 +11,6 @@ plotly
 joblib
 seaborn
 statsmodels
+torchviz
+torchinfo
+graphviz
